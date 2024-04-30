@@ -1,0 +1,11 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="KafkaStreamsApp" type="Application" factoryName="Application" nameIsGenerated="true">
+    <option name="MAIN_CLASS_NAME" value="com.github.jchipmunk.kafka.streams.KafkaStreamsApp" />
+    <module name="kafka-streams" />
+    <option name="PROGRAM_PARAMETERS" value="stream/config/server.properties" />
+    <option name="VM_PARAMETERS" value="-Dlogback.configurationFile=stream/config/logback.xml -javaagent:$MAVEN_REPOSITORY$/io/prometheus/jmx/jmx_prometheus_javaagent/0.20.0/jmx_prometheus_javaagent-0.20.0.jar=8080:stream/config/kafka-streams.yml" />
+    <method v="2">
+      <option name="Make" enabled="true" />
+    </method>
+  </configuration>
+</component>

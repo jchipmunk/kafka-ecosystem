@@ -1,0 +1,212 @@
+version: '2.4'
+name: 'kafka-ecosystem'
+services:
+  zookeeper:
+    image: quay.io/debezium/zookeeper:2.6
+    cpus: 0.2
+    mem_limit: 512m
+    mem_reservation: 512m
+
+  kafka:
+    image: quay.io/debezium/kafka:2.6
+    cpus: 0.5
+    mem_limit: 1024m
+    mem_reservation: 768m
+    depends_on:
+      - zookeeper
+    environment:
+      - ZOOKEEPER_CONNECT=zookeeper:2181
+      - KAFKA_HEAP_OPTS=-Xms256m -Xmx512m
+
+  schema-registry:
+    image: confluentinc/cp-schema-registry:7.5.4
+    cpus: 0.2
+    mem_limit: 512m
+    mem_reservation: 512m
+    depends_on:
+      - kafka
+    ports:
+      - 8081:8081
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: PLAINTEXT://kafka:9092
+
+  out-zookeeper:
+    image: quay.io/debezium/zookeeper:2.6
+    cpus: 0.2
+    mem_limit: 512m
+    mem_reservation: 512m
+
+  out-kafka:
+    image: quay.io/debezium/kafka:2.6
+    cpus: 0.5
+    mem_limit: 1024m
+    mem_reservation: 768m
+    depends_on:
+      - out-zookeeper
+    environment:
+      - ZOOKEEPER_CONNECT=out-zookeeper:2181
+      - KAFKA_HEAP_OPTS=-Xms256m -Xmx512m
+
+  stream:
+    build:
+      dockerfile: stream/Dockerfile
+      args:
+        JMX_AGENT_VERSION: 0.20.0
+        METRICS_PORT: 7171
+    cpus: 0.5
+    mem_limit: 1024m
+    mem_reservation: 768m
+    ports:
+      - 7171:7171
+      - 1501:1501
+    depends_on:
+      - kafka
+    environment:
+      - HEAP_OPTS=-Xms256m -Xmx512m -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:1501
+      - DEBUG=true
+    volumes:
+      - ./stream/config:/app/config
+
+#  postgres:
+#    image: quay.io/debezium/postgres:16
+#    ports:
+#      - 5432:5432
+#    environment:
+#      - POSTGRES_USER=postgres
+#      - POSTGRES_PASSWORD=postgres
+#
+#  mongo:
+#    image: mongo:4.2.18
+#    ports:
+#      - 27017:27017
+#    entrypoint: [ '/usr/bin/mongod', '--replSet', 'rs0', '--bind_ip_all' ]
+
+  oracle:
+    image: oracle/database:19.3.0-ee
+    cpus: 2
+    mem_limit: 5120m
+    mem_reservation: 2048m
+    shm_size: 2gb
+    ports:
+      - 1521:1521
+    environment:
+      - ORACLE_SID=orclcdb
+      - ORACLE_PDB=orclpdb1
+      - ORACLE_PWD=top_secret
+    volumes:
+      - ./oracle/oradata:/opt/oracle/oradata
+      - ./oracle/startup:/opt/oracle/scripts/startup
+
+  olr:
+    image: bersler/openlogreplicator:debian-12.0
+    cpus: 0.5
+    mem_limit: 512m
+    mem_reservation: 512m
+    shm_size: 2gb
+    platform: linux/amd64
+    ports:
+      - 9000:9000
+    depends_on:
+      - oracle
+    volumes:
+      - ./oracle/checkpoint:/opt/OpenLogReplicator/checkpoint
+      - ./oracle/oradata:/opt/oracle/oradata
+      - ./oracle/scripts:/opt/OpenLogReplicator/scripts
+
+  connect:
+    build:
+      context: connect
+      args:
+        DEBEZIUM_VERSION: 2.6
+        JMX_AGENT_VERSION: 0.20.0
+        METRICS_PORT: 7371
+    cpus: 0.5
+    mem_limit: 1024m
+    mem_reservation: 768m
+    ports:
+      - 8083:8083
+      - 7371:7371
+      - 1502:1502
+    depends_on:
+      - kafka
+    environment:
+      - BOOTSTRAP_SERVERS=kafka:9092
+      - GROUP_ID=connect
+      - CONFIG_STORAGE_TOPIC=connect_configs
+      - OFFSET_STORAGE_TOPIC=connect_offsets
+      - STATUS_STORAGE_TOPIC=connect_statuses
+      - KAFKA_HEAP_OPTS=-Xms256m -Xmx512m -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:1502
+#    volumes:
+#      - ./confluentinc-kafka-connect-avro-converter:/kafka/connect/confluentinc-kafka-connect-avro-converter
+#      - ./debezium-connector-jdbc:/kafka/connect/debezium-connector-jdbc
+
+  mirror-maker:
+    build:
+      context: mirror-maker
+      args:
+        DEBEZIUM_VERSION: 2.6
+        JMX_AGENT_VERSION: 0.20.0
+        METRICS_PORT: 7471
+    cpus: 0.5
+    mem_limit: 1024m
+    mem_reservation: 768m
+    ports:
+      - 7471:7471
+      - 1503:1503
+    depends_on:
+      - kafka
+      - out-kafka
+    environment:
+      - CLUSTER=external
+      - KAFKA_HEAP_OPTS=-Xms256m -Xmx512m -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:1503
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    cpus: 0.5
+    mem_limit: 768m
+    mem_reservation: 768m
+    ports:
+      - 8080:8080
+    depends_on:
+      - kafka
+      - out-kafka
+      - schema-registry
+    environment:
+      - KAFKA_CLUSTERS_0_NAME=internal
+      - KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS=kafka:9092
+      - KAFKA_CLUSTERS_1_NAME=external
+      - KAFKA_CLUSTERS_1_BOOTSTRAPSERVERS=out-kafka:9092
+      - KAFKA_CLUSTERS_0_SCHEMAREGISTRY=http://schema-registry:8081
+      - KAFKA_CLUSTERS_0_KAFKACONNECT_0_NAME=internal
+      - KAFKA_CLUSTERS_0_KAFKACONNECT_0_ADDRESS=http://connect:8083
+
+  prometheus:
+    image: prom/prometheus:v2.37.6
+    cpus: 0.5
+    mem_limit: 1024m
+    mem_reservation: 512m
+    ports:
+      - 9090:9090
+    command:
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=24h'
+      - '--web.enable-lifecycle'
+      - '--storage.tsdb.no-lockfile'
+      - '--web.route-prefix=/'
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+
+  grafana:
+    image: grafana/grafana:8.3.3
+    cpus: 0.5
+    mem_limit: 1024m
+    mem_reservation: 512m
+    ports:
+      - 3000:3000
+    user: "0"
+    volumes:
+      - ./grafana:/etc/grafana/provisioning

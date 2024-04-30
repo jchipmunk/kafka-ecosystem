@@ -1,0 +1,24 @@
+global:
+  scrape_interval: 10s
+  evaluation_interval: 10s
+  scrape_timeout: 5s
+
+scrape_configs:
+  - job_name: 'stream'
+    scrape_interval: 10s
+    honor_labels: true
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['stream:7171']
+  - job_name: 'connect'
+    scrape_interval: 10s
+    honor_labels: true
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['connect:7371']
+  - job_name: 'mirror-maker'
+    scrape_interval: 10s
+    honor_labels: true
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['mirror-maker:7471']
